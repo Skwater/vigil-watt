@@ -33,13 +33,15 @@ public sealed class AtkPlugin : BatteryPluginBase
     private const ushort DonglePid = 0x101B;              // 8K dongle（产品名 "ATK Mouse 8K Dongle"）
     private const ushort DonglePid1K = 0x101A;            // 1K dongle
     private const ushort DonglePidV3 = 0x1303;            // 8K dongle（产品名 "Wireless mouse 8k dongle-M"）
+    private const ushort DonglePidR1Nk = 0x10C9;
+    private const ushort BodyPidR1Nk = 0x10C7;
 
     /// <summary>电量口的 usage page；必须精确匹配，否则会对 FF03/FF04/FF05/FF06 等厂商口各白发一帧查询。</summary>
     private const ushort UsagePageBattery = 0xFF02;
 
-    /// <summary>已知的接收器 PID：这三个都认同一条查询帧、响应结构一致。</summary>
+    // R1 Nearlink 的 FF02 同时有 20B 与 17B 集合，登记接收器后才能按严格长度排除前者。
     private static bool IsReceiverPid(ushort pid) =>
-        pid is DonglePid or DonglePid1K or DonglePidV3;
+        pid is DonglePid or DonglePid1K or DonglePidV3 or DonglePidR1Nk;
 
     private static DateTimeOffset _receiverCheckedAt;
 
@@ -74,7 +76,16 @@ public sealed class AtkPlugin : BatteryPluginBase
     private const string ProtocolMouse = "atk-v1";
     private const string ProtocolVia = "atk-keyboard-via";
 
-    /// <summary>认领接收器或有线本体，二者只认领其一（接收器优先），以免两条记录读数来跳。</summary>
+    // R1 Nearlink 插线后接收器不再应答，必须释放旧句柄并交给本体查询。
+    protected override IReadOnlyCollection<string> SkipPathsForThisPass(IReadOnlyList<HidDeviceInfo> availableDevices)
+        => availableDevices.Any(d => d.VendorId == VendorId && d.ProductId == BodyPidR1Nk
+                && d.UsagePage == UsagePageBattery
+                && AtkCodec.IsSupportedInterface(d.InputReportLength, d.OutputReportLength))
+            ? availableDevices.Where(d => d.VendorId == VendorId && d.ProductId == DonglePidR1Nk)
+                .Select(d => d.DevicePath).ToArray()
+            : Array.Empty<string>();
+
+    /// <summary>认领电量接口；R1 Nearlink 插线优先本体，其它型号维持接收器优先。</summary>
     protected override bool IsCandidate(HidDeviceInfo info)
     {
         // 键盘链路（VIA，page 0xFF60）：与鼠标同 VID，靠 usage page 分流，必须先判。
@@ -85,10 +96,8 @@ public sealed class AtkPlugin : BatteryPluginBase
         if (info.VendorId != VendorId || info.UsagePage != UsagePageBattery)
             return false;
 
-        // 长度判据：必须能收发 17 字节电量帧，否则写不进/读不出完整帧。
-        // 接收器用严格判据（in=17 / out=17，本机实测 0x101B、0x101A、0x1303 三者一致）；
-        // 本体的接口长度未实测（插充电线时才枚举出来），只要求"容得下"这一能力。
-        if (IsReceiverPid(info.ProductId))
+        // R1 Nearlink 两端均有 20B 干扰集合，和已知接收器一样只认严格 17B 接口。
+        if (IsReceiverPid(info.ProductId) || info.ProductId == BodyPidR1Nk)
             return AtkCodec.IsSupportedInterface(info.InputReportLength, info.OutputReportLength);
 
         if (info.InputReportLength < AtkCodec.ReportLength || info.OutputReportLength < AtkCodec.ReportLength)
@@ -103,14 +112,7 @@ public sealed class AtkPlugin : BatteryPluginBase
         return !ReceiverOfSameGroupInPlace(info.ProductId);
     }
 
-    /// <summary>
-    /// 设备归一组：同一台鼠标的接收器与有线本体归到同一组（同一台设备的两个形态）。
-    /// 实测配对（F1 Pro Max 与 F1 V3 ULTIMATE+ 各一套）：接收器 0x101B ↔ 本体 0x1015；
-    /// 接收器 0x1303 ↔ 本体 0x12A9。该鼠标的 HID 序列号为空、容器 ID 也不同，
-    /// **硬件层没有可自动配对的标识**，只能按实测配对表归一。
-    /// 未登记的 PID 交回基类默认（路径哈希），等于上游行为——宁可充电时多一条，
-    /// 也不能把两台不同的鼠标并成一条。
-    /// </summary>
+    // 无跨模式通用身份时按实测型号组归一；同型号多设备限制见 docs/hardware/atk.md §4、§8.3。
     private static readonly Dictionary<ushort, string> DeviceGroups = new()
     {
         [0x101B] = "promax",   // F1 Pro Max 8K 接收器
@@ -118,6 +120,8 @@ public sealed class AtkPlugin : BatteryPluginBase
         [0x1015] = "promax",   // F1 Pro Max 本体（插充电线时枚举）
         [0x1303] = "v3",       // F1 V3 ULTIMATE+ 8K-M 接收器
         [0x12A9] = "v3",       // F1 V3 ULTIMATE+ 本体（插充电线时枚举）
+        [DonglePidR1Nk] = "r1nk",
+        [BodyPidR1Nk] = "r1nk",
     };
 
     /// <summary>各组的型号名（本体上报的产品名，即机型）；按组存，两只鼠标互不覆盖。</summary>
@@ -130,7 +134,7 @@ public sealed class AtkPlugin : BatteryPluginBase
         return m.Success ? (ushort)Convert.ToInt32(m.Groups[1].Value, 16) : (ushort)0;
     }
 
-    /// <summary>设备 ID 按"配对组"归一：同组共用一个 ID，不同鼠标各自一条。</summary>
+    /// <summary>设备 ID 按配对组归一；未登记的 PID 保持路径哈希。</summary>
     protected override string IdFor(string devicePath)
     {
         var pid = PidFromPath(devicePath);
@@ -139,12 +143,13 @@ public sealed class AtkPlugin : BatteryPluginBase
             : base.IdFor(devicePath);   // 未登记的 PID → 保持上游默认（路径哈希）
     }
 
-    /// <summary>已验证型号表（键盘 A98 Pro 与 F1 ULTIMATE 2.0 两个 PID）。</summary>
     private static readonly Dictionary<ushort, string> KnownModelByPid = new()
     {
         [0x1152] = "ATK A98 Pro",
         [0x11D9] = "ATK F1 Ultimate 2.0",
         [0x11E4] = "ATK F1 Ultimate 2.0",
+        [DonglePidR1Nk] = "VXE R1 Nearlink",
+        [BodyPidR1Nk] = "VXE R1 Nearlink",
     };
 
     protected override string BuildDisplayName(HidDeviceInfo info)

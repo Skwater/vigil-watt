@@ -6,7 +6,7 @@
 
 ## 1. 当前状态
 
-新增适配：8 个新品牌（华硕 ROG、雷蛇、AKG、ATK、HyperX、凌豹、VGN、Haute42）与北通鲲鹏20 三通道、狼蛛 G9 / L9 / F108 Pro、VGN V98 Pro、迈从 G75 Pro / A5 V2 Ultra / X9、凌豹 K98、ATK A98 Pro、AULA HERO 68 Air 等，合计约 29 台；新品牌默认关。逐台状态见 §2 表，协议与验证边界见对应 `hardware/*.md`。
+新增适配：8 个新品牌（华硕 ROG、雷蛇、AKG、ATK、HyperX、凌豹、VGN、Haute42）与北通鲲鹏20 三通道、狼蛛 G9 / L9 / F108 Pro、VGN V98 Pro、迈从 G75 Pro / A5 V2 Ultra / X9、凌豹 K98、ATK A98 Pro、AULA HERO 68 Air 等，合计约 29 台；新品牌默认关。逐台状态见 §2 表，协议与验证边界见对应 `hardware/*.md`。VXE R1 Nearlink `373B:10C9` 无线与 `10C7` 本体充电均已验证，插线由本体接管，见 `hardware/atk.md` §8。
 
 当前安装包 **1.3.0**（`dist/`，本机试装用；尚未上传正式 Release）。正式线上以 GitHub 最新 Release 为准，Gitee 是回退源；更新源 GitHub 优先、8 秒不通回退 Gitee。发新版时保留上一版 `*-full.nupkg` 作为 delta 基准；规则见 `dev/build.md` §8。
 

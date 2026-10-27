@@ -81,10 +81,7 @@ internal static class AtkCodec
         return (op[MillivoltOffset] << 8) | op[MillivoltOffset + 1];
     }
 
-    /// <summary>
-    /// 严格接口判据：17 字节 in / 17 字节 out 才可能承载电量帧。
-    /// ⚠ 只对**接收器**用严格判据——本体的接口长度未实测（插充电线时才枚举出来）。
-    /// </summary>
+    // 严格排除同页非电量集合；已验证的接收器及 R1 Nearlink 本体均使用此判据。
     public static bool IsSupportedInterface(ushort inputLength, ushort outputLength)
         => inputLength == ReportLength && outputLength == ReportLength;
 
